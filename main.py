@@ -486,7 +486,6 @@ def pick_unique_topic():
     if available:
         return random.choice(available)
 
-    # Lifetime Infinite Topic Generator once seed list is completed
     prompt = (
         f"Generate 1 unique historical food topic from South Asian, Persian, Turkish, or Arab history "
         f"not in this list: {', '.join(list(used)[-40:])}. "
@@ -549,7 +548,6 @@ def has_urdu_script(text):
 
 
 def build_guaranteed_75s_history_script(topic_en, topic_ur):
-    """Guaranteed 210+ word rich Urdu historical documentary script (~78-85 seconds narration)."""
     return (
         f"السلام علیکم دوستو! مزے دار پکوان کے تاریخی سلسلے میں میں آپ سب کو خوش آمدید کہتی ہوں۔ "
         f"آج ہم جس لاجواب اور تاریخی پکوان کی صدیوں پرانی داستان کھنگالنے جا رہے ہیں، اس کا نام ہے {topic_ur}۔ "
@@ -584,7 +582,6 @@ STRICT REQUIREMENTS:
 
     script_data = None
 
-    # 1. Try Google Gemini API if valid AIza key is provided
     if GOOGLE_API_KEY and GOOGLE_API_KEY.startswith("AIza"):
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GOOGLE_API_KEY}"
@@ -602,7 +599,6 @@ STRICT REQUIREMENTS:
         except Exception as e:
             print(f"Google API skipped ({e}), using Pollinations Text AI...")
 
-    # 2. Try Pollinations Text API
     if not script_data:
         try:
             res = requests.post(
@@ -643,7 +639,6 @@ STRICT REQUIREMENTS:
         queries = base_keywords
     else:
         voiceover = script_data["voiceover_urdu"].strip()
-        # Enforce 75-second minimum length (at least ~185 Urdu words)
         if len(voiceover.split()) < 180:
             voiceover = (
                 voiceover
@@ -652,7 +647,7 @@ STRICT REQUIREMENTS:
                     f"تاریخ دانوں کے مطابق {topic_ur} کی مقبولیت کا سب سے بڑا راز اس کے خالص دیسی مصالحے اور پکانے کا وہ قدیم طریقہ ہے جو نسل در نسل سینے بہ سینے منتقل ہوتا رہا۔ "
                     f"شاہی باورچی خانوں میں اس ڈش کو تیار کرنے کے لیے خاص طور پر تجربہ کار رکابدار رکھے جاتے تھے جو مصالحوں کی خوشبو اور آنچ کے توازن کا خاص خیال رکھتے تھے۔ "
                     f"یہی وجہ ہے کہ صدیوں گزرنے کے باوجود آج بھی ہر خاص و عام کی دعوت اس شاندار پکوان کے بغیر ادھوری سمجھی جاتی ہے۔ "
-                    f"اگر آپ کو کھانوں کی تاریخ کا یہ سفر پسند آیا ہو تو ویڈیو کو لائک کریں اور کمنٹ میں اپنی پسندیدہ ڈش کا نام ضرور لکھیں۔"
+                    f"اگر آپ کو کھانوں کی تاریخ کا یہ سفر پسند آیا ہو تو ویڈیو کو لائک کریں اور کمنٹ میں اپنی پسندیدہ ڈش کا نام ضرور لکھیں"
                 )
             )
         caption = script_data.get("caption") or f"📜 {topic_en} ({topic_ur}) #MazydarPakwan"
@@ -666,7 +661,6 @@ STRICT REQUIREMENTS:
 
 
 def generate_voiceover(text, audio_path):
-    # Slightly measured documentary pace (-4%) for clear historical storytelling and 75s+ duration
     cmd = [
         "edge-tts",
         "--voice",
@@ -719,11 +713,7 @@ def ensure_minimum_audio_duration(topic_en, topic_ur, voice_path):
 
 
 def fetch_pixabay_media_pool(queries, needed_count):
-    """Fetches high-definition Pixabay food videos (primary) and high-res photos (secondary)
-
-    so we have enough unique fast-paced clips for the entire 75+ second video.
-    """
-    fallback_food_Pool = [
+    fallback_food_pool = [
         "indian food",
         "curry cooking",
         "spices",
@@ -746,7 +736,7 @@ def fetch_pixabay_media_pool(queries, needed_count):
         "sweet dessert",
     ]
     all_queries = []
-    for q in queries + fallback_food_Pool:
+    for q in queries + fallback_food_pool:
         if q not in all_queries:
             all_queries.append(q)
 
@@ -758,7 +748,6 @@ def fetch_pixabay_media_pool(queries, needed_count):
         f"Searching Pixabay HD Library for {needed_count} fast-paced clips..."
     )
 
-    # 1. Fetch Pixabay HD Stock Videos
     for q in all_queries:
         if len(video_urls) >= needed_count:
             break
@@ -793,7 +782,6 @@ def fetch_pixabay_media_pool(queries, needed_count):
         except Exception as e:
             print(f"Pixabay video search notice for '{q}': {e}")
 
-    # 2. Fetch Pixabay High-Res Photos to interleave or top up if needed
     for q in all_queries:
         if len(video_urls) + len(photo_urls) >= needed_count + 6:
             break
@@ -828,7 +816,6 @@ def fetch_pixabay_media_pool(queries, needed_count):
             "Pixabay returned no media! Check if PIXABAY_API_KEY is valid."
         )
 
-    # Ensure we have at least `needed_count` items
     while len(combined) < needed_count:
         combined.extend(combined[: needed_count - len(combined)])
 
@@ -843,7 +830,6 @@ def render_single_fast_clip(
         topic_en[:36].replace("'", "").replace(":", " -").replace('"', "")
     )
 
-    # Sleek top branding bar drawn directly by FFmpeg in crisp 1080p HD
     drawbox_filter = (
         f"drawbox=x=40:y=60:w=1000:h=130:color=black@0.68:t=fill,"
         f"drawbox=x=40:y=60:w=1000:h=130:color=0xFFC837@0.9:t=4,"
@@ -860,7 +846,6 @@ def render_single_fast_clip(
         with open(raw_vid, "wb") as f:
             f.write(r.content)
 
-        # Center crop to 1080x1920 vertical HD + slight speed boost (1.15x) for energetic visual pace
         vf = (
             f"setpts=0.88*PTS,"
             f"scale=1080:1920:force_original_aspect_ratio=increase,"
@@ -950,7 +935,6 @@ def render_single_fast_clip(
 
 
 def generate_sfx_and_master_audio(voice_path, final_audio_path, duration):
-    """Generates subtle kitchen cooking sizzle + soft documentary ambience underneath the female voiceover."""
     sfx_path = "kitchen_sfx.wav"
     sfx_filter = (
         f"anoisesrc=d={duration}:c=pink:r=44100:a=0.028,"
@@ -1032,7 +1016,6 @@ def main():
     final_audio_path = "master_audio.m4a"
     generate_sfx_and_master_audio(voice_path, final_audio_path, total_duration)
 
-    # Calculate how many 3-second fast clips we need to cover the full 75+ second audio
     num_clips = math.ceil(total_duration / CLIP_DURATION)
     print(
         f"Total Video Duration: {total_duration:.1f}s -> Preparing {num_clips} fast-paced clips (3.0s each)..."
@@ -1044,9 +1027,7 @@ def main():
     for idx, (m_type, m_url) in enumerate(media_pool):
         clip_name = f"clip_{idx:03d}.mp4"
         try:
-            print(
-                f"Rendering fast clip {idx+1}/{num_clips} ({m_type})..."
-            )
+            print(f"Rendering fast clip {idx+1}/{num_clips} ({m_type})...")
             render_single_fast_clip(
                 m_type, m_url, idx, CLIP_DURATION, topic_en, clip_name
             )
@@ -1079,9 +1060,17 @@ def main():
         "-profile:v",
         "high",
         "-crf",
-        "20",
+        "22",
+        "-b:v",
+        "2500k",
+        "-maxrate",
+        "3000k",
+        "-bufsize",
+        "6000k",
         "-c:a",
-        "copy",
+        "aac",
+        "-b:a",
+        "128k",
         "-pix_fmt",
         "yuv420p",
         "-shortest",
