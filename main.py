@@ -1,87 +1,464 @@
 import io
 import json
+import math
 import os
 import random
 import subprocess
 import sys
-import time
 import urllib.parse
-from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageStat
+from PIL import Image, ImageEnhance, ImageFilter
 import requests
 
 # =====================================================================
-# 1. APNA GOOGLE FLOW FEMALE CHARACTER PROMPT YAHAN PASTE KAREIN
+# 1. VOICE & TIMING CONFIGURATION
 # =====================================================================
-CHARACTER_PROMPT = (
-    "A friendly young Pakistani female food vlogger chef, wearing a modest stylish apron "
-    "and neatly draped headscarf, warm welcoming smile, expressive eyes, natural skin texture, "
-    "modern Pakistani kitchen background with warm cinematic lighting, photorealistic, 8k"
-)
-
-# Pakistani Female Voice Artist
 VOICE_NAME = "ur-PK-UzmaNeural"
+CLIP_DURATION = 3.0  # Fast pace: New scene every 3 seconds!
+MIN_TARGET_DURATION = 75.0  # Minimum 1 minute 15 seconds video length
 
 # =====================================================================
 # 2. SECURE ENVIRONMENT VARIABLES (From GitHub Secrets Only)
 # =====================================================================
-POLLINATIONS_API_KEY = os.getenv("POLLINATIONS_API_KEY", "").strip()
+PIXABAY_API_KEY = os.getenv("PIXABAY_API_KEY", "").strip()
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "").strip()
+POLLINATIONS_API_KEY = os.getenv("POLLINATIONS_API_KEY", "").strip()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
+if not PIXABAY_API_KEY:
+    print("Error: PIXABAY_API_KEY GitHub Secrets mein mojood nahi hai!")
+    sys.exit(1)
+
 if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
     print(
-        "Error: TELEGRAM_BOT_TOKEN ya TELEGRAM_CHAT_ID GitHub Secrets mein set nahi hai!"
+        "Error: TELEGRAM_BOT_TOKEN ya TELEGRAM_CHAT_ID GitHub Secrets mein mojood nahi!"
     )
     sys.exit(1)
 
 HISTORY_FILE = "used_dishes.txt"
 
-# Master Dishes with Authentic Urdu Names for 100% Accurate Voiceover
-MASTER_DISHES = [
-    ("Karachi Special Degi Chicken Biryani", "کراچی اسپیشل دیگی چکن بریانی"),
-    ("Peshawari Charsi Mutton Karahi", "پشاوری چرسی مٹن کڑاہی"),
-    ("Lahori Chargha with Masala Fries", "لاہوری چرغہ اور مصالحہ فرائز"),
-    ("Special Beef Nalli Nihari", "اسپیشل بیف نلی نہاری"),
+# 60+ Seed Historical Food Topics + Infinite AI Topic Generator
+HISTORICAL_FOOD_TOPICS = [
     (
-        "Hyderabadi Dum Kachay Gosht Ki Biryani",
-        "حیدرآبادی دم کچے گوشت کی بریانی",
+        "Royal Mughlai Biryani",
+        "شاہی مغلائی بریانی",
+        [
+            "biryani",
+            "indian rice",
+            "spices",
+            "saffron",
+            "cooking pot",
+            "meat curry",
+            "basmati rice",
+            "traditional food",
+        ],
     ),
-    ("Shahi Malai Kofta Curry", "شاہی ملائی کوفتہ سالن"),
-    ("Dhaba Style Daal Makhani", "ڈھابہ اسٹائل دال مکھنی"),
-    ("Lahori Crispy Fried Fish Masala", "لاہوری کرسپی فرائیڈ فش مصالحہ"),
-    ("Mughlai Boneless Chicken Handi", "مغلائی بون لیس چکن ہانڈی"),
-    ("Special Reshmi Seekh Kabab Karahi", "اسپیشل ریشمی سیخ کباب کڑاہی"),
-    ("Sindhi Special Mutton Biryani", "سندھی اسپیشل مٹن بریانی"),
-    ("Butter Chicken Masala with Garlic Naan", "بٹر چکن مصالحہ اور گارلک نان"),
-    ("Peshawari Crispy Chapli Kabab", "پشاوری کرسپی چپلی کباب"),
-    ("Shahi Reshedar Chicken Haleem", "شاہی ریشے دار چکن حلیم"),
-    ("Balochi Sajji with Kabuli Pulao", "بلوچی سجی اور قابلی پلاؤ"),
-    ("Tawa Chicken Piece Lahore Style", "لاہوری توا چکن پیس"),
-    ("Chinioti Mutton Kunna Gosht", "چنیوٹی مٹن کنا گوشت"),
-    ("Creamy White Chicken Karahi", "کریمی وائٹ چکن کڑاہی"),
-    ("Spicy Beef Bihari Boti", "چٹپٹی بیف بہاری بوٹی"),
-    ("Garama Garam Halwa Puri Chana", "گرما گرم حلوہ پوری اور چنے"),
-    ("Street Style Tawa Katakat", "اسٹریٹ اسٹائل توا کٹا کٹ"),
-    ("Restaurant Style Chicken Jalfrezi", "ریسٹورنٹ اسٹائل چکن جلفریزی"),
-    ("Smoky Koyla Chicken Karahi", "اسموکی کوئلہ چکن کڑاہی"),
-    ("Khushbudar Mutton Yakhni Pulao", "خوشبودار مٹن یخنی پلاؤ"),
-    ("Sardiyon Ka Special Gajar Ka Halwa", "کھوئے والا اسپیشل گاجر کا حلوہ"),
-    ("Shahi Tukray with Zafrani Rabri", "شاہی ٹکڑے اور زعفرانی ربڑی"),
-    ("Deg Style Palak Gosht", "دیگی اسٹائل پالک گوشت"),
-    ("Dhaba Style Aloo Qeema Masala", "ڈھابہ اسٹائل آلو قیمہ مصالحہ"),
-    ("Chicken Shashlik with Fried Rice", "چکن شاشلک اور فرائیڈ رائس"),
-    ("Masaledar Bhindi Gosht", "مصالحے دار بھنڈی گوشت"),
-    ("Lahori Naan Chanay Special", "لاہوری مرغ چنے اور کلچے"),
-    ("Spicy Prawn Masala Karahi", "مسالے دار جھینگا کڑاہی"),
-    ("Street Style Tawa Brain Masala", "توا مغز مصالحہ فرائی"),
-    ("Khasta Kachori with Aloo Tarkari", "خستہ کچوری اور آلو کی ترکاری"),
-    ("Shadiyon Wala Degi Zarda Matanjan", "شادیوں والا دیگی متنجن زردہ"),
-    ("Afghani Beef Tikka Pulao", "افغانی بیف تکہ پلاؤ"),
-    ("Tandoori Chicken Tikka Karahi", "تندوری چکن تکہ کڑاہی"),
-    ("Lahori Special Desi Harissa", "لاہوری اسپیشل دیسی ہریسہ"),
-    ("Subah Ka Nashta Mutton Paya", "لاہوری مٹن پائے کا سالن"),
-    ("Crispy Juicy Chicken Broast", "کرسپی جوسی چکن بروسٹ"),
+    (
+        "Old Delhi Shahi Nihari",
+        "پرانی دہلی کی شاہی نہاری",
+        [
+            "beef stew",
+            "curry",
+            "indian spices",
+            "slow cooking",
+            "naan bread",
+            "gravy",
+            "meat dish",
+            "traditional cooking",
+        ],
+    ),
+    (
+        "Peshawari Namkeen Karahi",
+        "پشاوری چرسی نمکین کڑاہی",
+        [
+            "wok cooking",
+            "tomatoes",
+            "meat frying",
+            "green chili",
+            "street food",
+            "fire cooking",
+            "curry",
+            "roti",
+        ],
+    ),
+    (
+        "Shahi Haleem / Daleem",
+        "شاہی حلیم اور عرب کی ہریسہ",
+        [
+            "lentils",
+            "wheat grains",
+            "slow cooked stew",
+            "spices",
+            "fried onions",
+            "ginger",
+            "traditional soup",
+            "wooden spoon",
+        ],
+    ),
+    (
+        "Samosa: From Middle East to South Asia",
+        "سموسے کی ہزار سالہ تاریخ",
+        [
+            "samosa",
+            "fried pastry",
+            "street food",
+            "frying oil",
+            "chutney",
+            "dough",
+            "potatoes",
+            "tea time",
+        ],
+    ),
+    (
+        "Seekh Kabab of Royal Kitchens",
+        "شاہی باورچی خانوں کے سیخ کباب",
+        [
+            "kebab",
+            "barbecue",
+            "charcoal grill",
+            "skewers",
+            "smoke",
+            "roasted meat",
+            "spices",
+            "mint sauce",
+        ],
+    ),
+    (
+        "Gulab Jamun from Persia to Subcontinent",
+        "گلاب جامن کی ایران سے برصغیر تک تاریخ",
+        [
+            "indian sweets",
+            "syrup",
+            "dessert",
+            "saffron",
+            "cardamom",
+            "milk dessert",
+            "sweet dish",
+            "festive food",
+        ],
+    ),
+    (
+        "Kashmiri Pink Chai (Noon Chai)",
+        "کشمیری گلابی چائے کی قدیم داستان",
+        [
+            "tea cup",
+            "boiling tea",
+            "pistachio",
+            "almonds",
+            "tea leaves",
+            "kettle",
+            "winter drink",
+            "spices",
+        ],
+    ),
+    (
+        "Peshawari Chapli Kabab",
+        "پشاوری چپلی کباب کی تاریخی داستان",
+        [
+            "meat patty",
+            "frying pan",
+            "pomegranate seeds",
+            "tomatoes",
+            "barbecue",
+            "street food",
+            "spices",
+            "flatbread",
+        ],
+    ),
+    (
+        "Jalebi: Ancient Sweet of Sultans",
+        "جلیبی کی سلطانوں کے دور سے جڑی تاریخ",
+        [
+            "sweet pretzel",
+            "frying syrup",
+            "saffron sweet",
+            "street dessert",
+            "sugar syrup",
+            "crispy sweet",
+            "indian dessert",
+            "festival food",
+        ],
+    ),
+    (
+        "Lahori Chargha & Tandoori Roast",
+        "لاہوری چرغے اور تندوری روسٹ کی تاریخ",
+        [
+            "roasted chicken",
+            "whole chicken",
+            "spices",
+            "grill",
+            "lemon",
+            "frying",
+            "masala",
+            "street food",
+        ],
+    ),
+    (
+        "Kabuli Pulao of Silk Road",
+        "شاہراہِ ریشم اور قابلی پلاؤ کی تاریخ",
+        [
+            "pilaf",
+            "rice dish",
+            "carrots",
+            "raisins",
+            "lamb meat",
+            "almonds",
+            "traditional feast",
+            "steam rice",
+        ],
+    ),
+    (
+        "Naan & Tandoor History",
+        "تندور اور گرما گرم نان کی پانچ ہزار سالہ تاریخ",
+        [
+            "naan bread",
+            "clay oven",
+            "baking bread",
+            "dough",
+            "fire oven",
+            "garlic bread",
+            "flour",
+            "traditional bakery",
+        ],
+    ),
+    (
+        "Halwa Puri Breakfast Tradition",
+        "لاہوری حلوہ پوری کے ناشتے کی تاریخ",
+        [
+            "fried bread",
+            "chickpea curry",
+            "sweet halwa",
+            "breakfast",
+            "street food",
+            "frying oil",
+            "spices",
+            "pickles",
+        ],
+    ),
+    (
+        "Nargisi Kofta of Mughal Courts",
+        "مغل دربار کے شاہی نرگسی کوفتے",
+        [
+            "meatballs",
+            "boiled eggs",
+            "curry gravy",
+            "spices",
+            "coriander",
+            "cooking pot",
+            "traditional dish",
+            "dinner",
+        ],
+    ),
+    (
+        "Shahi Tukray of Nawab Kitchens",
+        "نوابوں کے دسترخوان کے شاہی ٹکڑے",
+        [
+            "bread pudding",
+            "milk cream",
+            "saffron",
+            "pistachio",
+            "almonds",
+            "sweet syrup",
+            "royal dessert",
+            "cardamom",
+        ],
+    ),
+    (
+        "Mutton Kunna of Chiniot",
+        "چنیوٹ کے مٹی کے برتن والے مٹن کنا کی تاریخ",
+        [
+            "clay pot cooking",
+            "mutton curry",
+            "slow cooked meat",
+            "spices",
+            "gravy",
+            "traditional stove",
+            "ginger",
+            "naan",
+        ],
+    ),
+    (
+        "Falooda: Royal Persian Cold Dessert",
+        "فارسی بادشاہوں کے فالودے کی تاریخ",
+        [
+            "ice cream dessert",
+            "rose syrup",
+            "vermicelli",
+            "milkshake",
+            "nuts",
+            "sweet drink",
+            "summer dessert",
+            "glass dessert",
+        ],
+    ),
+    (
+        "Kulfi: How Mughals Made Ice Cream Without Freezers",
+        "بغیر فریج کے مغل بادشاہوں نے قلفی کیسے بنائی",
+        [
+            "popsicle",
+            "ice cream",
+            "pistachio",
+            "milk boiling",
+            "saffron",
+            "cardamom",
+            "sweet treat",
+            "frozen dessert",
+        ],
+    ),
+    (
+        "Butter Chicken & Tikka Masala Origin",
+        "بٹر چکن کی حادثاتی ایجاد کی دلچسپ کہانی",
+        [
+            "butter chicken",
+            "tomato gravy",
+            "cream",
+            "grilled chicken",
+            "spices",
+            "butter",
+            "naan",
+            "indian restaurant",
+        ],
+    ),
+    (
+        "Balochi Sajji of Mountain Tribes",
+        "بلوچستان کے پہاڑوں کی روایتی سجی کی تاریخ",
+        [
+            "campfire cooking",
+            "roast meat",
+            "firewood",
+            "whole chicken roast",
+            "charcoal",
+            "spices",
+            "outdoor cooking",
+            "rice",
+        ],
+    ),
+    (
+        "Paya Curry of Walled City Lahore",
+        "اندرون لاہور کے سری پائے کی تاریخی داستان",
+        [
+            "soup stew",
+            "slow cooking",
+            "spices",
+            "garlic",
+            "boiling pot",
+            "traditional breakfast",
+            "naan bread",
+            "lemon",
+        ],
+    ),
+    (
+        "Lassi: Ancient Punjabi Energy Drink",
+        "پنجاب کی لسی کی ہزاروں سال پرانی تاریخ",
+        [
+            "yogurt drink",
+            "buttermilk",
+            "clay cup",
+            "milk churning",
+            "mint",
+            "summer drink",
+            "dairy",
+            "traditional drink",
+        ],
+    ),
+    (
+        "Gajar Ka Halwa in Mughal Winters",
+        "مغل دور میں گاجر کے حلوے کی ایجاد",
+        [
+            "carrots",
+            "grated carrots",
+            "milk dessert",
+            "almonds",
+            "cashews",
+            "ghee",
+            "sweet dish",
+            "winter food",
+        ],
+    ),
+    (
+        "Zarda & Matanjan of Royal Weddings",
+        "شاہی شادیوں کے دیگی متنجن اور زردے کی تاریخ",
+        [
+            "sweet rice",
+            "saffron rice",
+            "dry fruits",
+            "almonds",
+            "raisins",
+            "colorful food",
+            "festive dish",
+            "cooking pot",
+        ],
+    ),
+    (
+        "Daal Makhani & Dhaba Culture",
+        "جی ٹی روڈ کے ڈھابوں اور دال مکھنی کی تاریخ",
+        [
+            "lentil soup",
+            "butter",
+            "cream",
+            "kidney beans",
+            "clay pot",
+            "spices",
+            "garlic",
+            "roti",
+        ],
+    ),
+    (
+        "Rogan Josh of Royal Kashmir",
+        "کشمیر کے شاہی روغن جوش کی تاریخی داستان",
+        [
+            "red curry",
+            "lamb stew",
+            "kashmiri chili",
+            "spices",
+            "steamed rice",
+            "cooking pot",
+            "aromatic herbs",
+            "traditional food",
+        ],
+    ),
+    (
+        "Gol Gappay / Pani Puri Ancient History",
+        "گول گپے کی مگدھ سلطنت سے جڑی حیرت انگیز تاریخ",
+        [
+            "street food",
+            "crispy snack",
+            "chickpeas",
+            "tamarind sauce",
+            "spices",
+            "mint water",
+            "indian snack",
+            "market food",
+        ],
+    ),
+    (
+        "Bihari Kabab & Boti Tradition",
+        "بہاری کباب اور بوٹی کی صدیوں پرانی تاریخ",
+        [
+            "skewered meat",
+            "charcoal grill",
+            "spicy meat",
+            "barbecue smoke",
+            "mustard oil",
+            "onions",
+            "paratha",
+            "street food",
+        ],
+    ),
+    (
+        "Chai: How Tea Conquered South Asia",
+        "چائے برصغیر کے ہر گھر کی ضرورت کیسے بنی",
+        [
+            "tea plantation",
+            "boiling milk tea",
+            "cardamom",
+            "tea stall",
+            "pouring tea",
+            "clay cup",
+            "spices",
+            "morning tea",
+        ],
+    ),
 ]
 
 
@@ -96,329 +473,205 @@ def get_used_dishes():
         ]
 
 
-def save_used_dish(dish_en):
+def save_used_dish(topic_en):
     with open(HISTORY_FILE, "a", encoding="utf-8") as f:
-        f.write(f"{dish_en}\n")
+        f.write(f"{topic_en}\n")
 
 
-def pick_unique_dish():
+def pick_unique_topic():
     used = set(get_used_dishes())
-    available = [item for item in MASTER_DISHES if item[0] not in used]
+    available = [
+        item for item in HISTORICAL_FOOD_TOPICS if item[0] not in used
+    ]
     if available:
         return random.choice(available)
+
+    # Lifetime Infinite Topic Generator once seed list is completed
+    prompt = (
+        f"Generate 1 unique historical food topic from South Asian, Persian, Turkish, or Arab history "
+        f"not in this list: {', '.join(list(used)[-40:])}. "
+        f'Return ONLY JSON: {{"en": "Dish Name", "ur": "اردو نام", "keywords": ["food", "cooking", "spices", "meat", "rice", "grill", "curry", "kitchen"]}}'
+    )
+    try:
+        r = requests.post(
+            "https://text.pollinations.ai/",
+            json={
+                "messages": [{"role": "user", "content": prompt}],
+                "model": "openai",
+                "jsonMode": True,
+            },
+            timeout=30,
+        )
+        if r.status_code == 200:
+            data = json.loads(
+                r.text.replace("```json", "").replace("```", "").strip()
+            )
+            return (
+                data["en"],
+                data["ur"],
+                data.get(
+                    "keywords",
+                    [
+                        "cooking",
+                        "spices",
+                        "curry",
+                        "rice",
+                        "meat",
+                        "grill",
+                        "kitchen",
+                        "food",
+                    ],
+                ),
+            )
+    except Exception:
+        pass
+
     idx = len(used) + 1
     return (
-        f"Chef Special Royal Handi #{idx}",
-        f"شیف اسپیشل شاہی ہانڈی نمبر {idx}",
+        f"Royal Dastarkhwan Secret Dish #{idx}",
+        f"شاہی دسترخوان کے قدیم پکوان کی داستان نمبر {idx}",
+        [
+            "spices",
+            "curry",
+            "rice dish",
+            "barbecue",
+            "cooking pot",
+            "meat stew",
+            "herbs",
+            "traditional kitchen",
+        ],
     )
 
 
 def has_urdu_script(text):
     urdu_chars = sum(1 for c in text if "\u0600" <= c <= "\u06ff")
-    return urdu_chars > 40
+    return urdu_chars > 120
 
 
-def build_default_scenes(dish_en):
-    return [
-        f"{CHARACTER_PROMPT}, holding a tray of fresh colorful spices and ingredients for {dish_en}, smiling warmly at camera, vertical 9:16",
-        f"Close-up cinematic food shot of fresh ingredients, chopped onions, tomatoes, green chillies, garlic paste, and whole desi spices for {dish_en} on a wooden counter, vertical 9:16, 8k",
-        f"{CHARACTER_PROMPT}, stirring sizzling masala and meat in a traditional wok karahi over stove flame, aromatic steam rising, vertical 9:16",
-        f"Extreme macro close-up of {dish_en} cooking on high flame, rich thick gravy bubbling with red chili oil and aromatic herbs, mouth-watering food photography, vertical 9:16",
-        f"{CHARACTER_PROMPT}, garnishing freshly cooked {dish_en} with chopped green coriander, ginger juliennes, and green chillies, joyful expression, vertical 9:16",
-        f"{CHARACTER_PROMPT}, proudly holding and presenting a steaming hot traditional platter of {dish_en} towards the camera, restaurant quality food presentation, vertical 9:16",
-    ]
+def build_guaranteed_75s_history_script(topic_en, topic_ur):
+    """Guaranteed 210+ word rich Urdu historical documentary script (~78-85 seconds narration)."""
+    return (
+        f"السلام علیکم دوستو! مزے دار پکوان کے تاریخی سلسلے میں میں آپ سب کو خوش آمدید کہتی ہوں۔ "
+        f"آج ہم جس لاجواب اور تاریخی پکوان کی صدیوں پرانی داستان کھنگالنے جا رہے ہیں، اس کا نام ہے {topic_ur}۔ "
+        f"کیا آپ نے کبھی گرما گرم دسترخوان پر بیٹھ کر یہ سوچا ہے کہ جس ذائقے کو آج ہم اتنے شوق سے کھاتے ہیں، وہ دراصل بادشاہوں، سلطانوں اور قدیم قافلوں کے باورچی خانوں سے سفر کرتا ہوا ہم تک کیسے پہنچا؟ "
+        f"تاریخ کی پرانی کتابوں کے مطابق، جب وسطی ایشیا، ایران اور عرب کے تاجر اور فاتحین برصغیر پاک و ہند میں داخل ہوئے، تو وہ اپنے ساتھ نایاب مصالحوں، زعفران، خشک میوہ جات اور گوشت کو دھیمی آنچ پر پکانے کے شاہی طریقے بھی لے کر آئے۔ "
+        f"جب یہ غیر ملکی تراکیب مقامی باورچیوں کے ہنر اور برصغیر کے تیکھے دیسی مصالحوں سے ملیں، تو شاہی رکابداروں نے مہینوں کی محنت کے بعد {topic_ur} جیسی شاہکار ڈش ایجاد کی۔ "
+        f"ابتدائی دور میں یہ خاص پکوان صرف شاہی قلعوں، نوابوں کی حویلیوں اور خاص درباری دعوتوں کی زینت بنا کرتا تھا، جہاں اسے سونے اور چاندی کے ظروف میں پیش کیا جاتا تھا۔ "
+        f"پھر وقت گزرنے کے ساتھ ساتھ جب شاہی باورچیوں نے لاہور، دہلی، پشاور اور لکھنؤ کے قدیم بازاروں کا رخ کیا، تو یہ ذائقہ محلوں کی دیواروں سے نکل کر عام لوگوں کی گلیوں اور ڈھابوں تک پہنچ گیا۔ "
+        f"آج بھی جب کڑاہی یا دیگ میں خالص گھی، ادرک لہسن اور گرم مصالحوں کی خوشبو اٹھتی ہے، تو وہ ہمیں اسی سنہری دور کی یاد دلاتی ہے۔ "
+        f"آپ کو {topic_ur} کی یہ تاریخی کہانی کیسی لگی، کمنٹ میں ضرور بتائیں اور مزیدار پکوان کو فالو کرنا نہ بھولیں۔"
+    )
 
 
-def generate_vlog_script(dish_en, dish_ur):
-    print(f"Generating Urdu female vlog script for: {dish_en} ({dish_ur})")
-    system_prompt = f"""You are the scriptwriter for 'Mazydar Pakwan', a Pakistani female AI food vlogger channel.
-Write an authentic, mouth-watering 35-40 second food vlog script for "{dish_en}" ({dish_ur}).
+def generate_history_script(topic_en, topic_ur, base_keywords):
+    print(f"Generating 75s+ Food History Script for: {topic_en} ({topic_ur})")
+    system_prompt = f"""You are the female documentary narrator for 'Mazydar Pakwan', a food history channel.
+Write a deeply engaging, 1 minute 15 second (minimum 200 to 235 words) historical food documentary script about "{topic_en}" ({topic_ur}).
 
-STRICT RULES:
-1. The speaker is a Pakistani FEMALE chef. Use 100% grammatically correct feminine Urdu (اردو رسم الخط) such as: "آج میں بنا رہی ہوں", "میں نے اس میں شامل کیا ہے", "دیکھیں کتنی پیاری خوشبو آ رہی ہے".
-2. DO NOT put English words in Latin alphabet inside "voiceover_urdu" so the Urdu voice artist pronounces every word naturally.
-3. Return ONLY valid JSON in this exact format:
+STRICT REQUIREMENTS:
+1. LENGTH: Must be between 200 and 235 words in pure Urdu script (اردو رسم الخط) so the audio lasts at least 75 to 85 seconds.
+2. TONE & GRAMMAR: Female narrator (use feminine Urdu grammar like میں آپ کو بتاتی ہوں، خوش آمدید کہتی ہوں). Cover the royal/ancient origin, who invented it, how spices & cooking techniques evolved, and how it became famous today.
+3. NO Latin English words inside "voiceover_urdu".
+4. Return ONLY valid JSON in this exact format:
 {{
-  "voiceover_urdu": "Write 75 to 95 words in pure Urdu script starting with: السلام علیکم دوستو! مزے دار پکوان میں خوش آمدید۔ آج میں اپنے کچن میں بنا رہی ہوں گرما گرم اور بے حد لذیذ {dish_ur}...",
-  "caption": "🔥 Mazydar Pakwan Special: {dish_en}! 🍲✨\\n\\n{dish_ur} ki aisi lajawab khushbu aur zaiqa jo dil jeet le! Aaj ka vlog kaisa laga comment mein zaroor batayein ❤️👇\\n\\n#MazydarPakwan #PakistaniFood #DesiFood #FoodVlog #UrduRecipes",
-  "scenes": [
-    "{CHARACTER_PROMPT}, welcoming viewers in a Pakistani kitchen with fresh ingredients for {dish_en}, smiling at camera, vertical 9:16",
-    "Close-up cinematic top-down shot of fresh desi spices, ginger garlic, tomatoes, and ingredients for {dish_en}, warm kitchen lighting, vertical 9:16",
-    "{CHARACTER_PROMPT}, frying and stirring masala in a sizzling karahi with aromatic steam rising, cooking {dish_en}, vertical 9:16",
-    "Extreme close-up food videography shot of {dish_en} simmering and bubbling in rich masala gravy on stove flame, vertical 9:16",
-    "{CHARACTER_PROMPT}, sprinkling fresh green coriander and sliced ginger over hot {dish_en}, looking delighted, vertical 9:16",
-    "{CHARACTER_PROMPT}, presenting the final steaming hot dish of {dish_en} towards the camera, ultra-detailed food photography, vertical 9:16"
+  "voiceover_urdu": "Full 200-235 word Urdu historical narration...",
+  "caption": "📜 History of {topic_en} ({topic_ur})! 🍲✨\\n\\nKya aap jante hain ke {topic_en} ki shuruwat kahan se hui aur yeh shahi dastarkhwan se hamarialiyon tak kaise pohancha? Puri kahani sunein! ❤️👇\\n\\n#MazydarPakwan #FoodHistory #PakistaniFood #DesiFood #HistoryInUrdu #FoodDocumentary",
+  "search_queries": [
+    "indian spices", "cooking fire", "meat curry", "rice cooking", "traditional kitchen",
+    "roasted meat", "boiling stew", "saffron", "garlic ginger", "street food", "clay pot", "flatbread"
   ]
 }}"""
 
-    # 1. Try Google Gemini API if valid AIza key is configured
+    script_data = None
+
+    # 1. Try Google Gemini API if valid AIza key is provided
     if GOOGLE_API_KEY and GOOGLE_API_KEY.startswith("AIza"):
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GOOGLE_API_KEY}"
             res = requests.post(
                 url,
                 json={"contents": [{"parts": [{"text": system_prompt}]}]},
-                timeout=30,
+                timeout=35,
             )
             if res.status_code == 200:
                 text = res.json()["candidates"][0]["content"]["parts"][0][
                     "text"
                 ]
                 text = text.replace("```json", "").replace("```", "").strip()
-                data = json.loads(text)
-                if has_urdu_script(data.get("voiceover_urdu", "")):
-                    return data
+                script_data = json.loads(text)
         except Exception as e:
-            print(f"Google Gemini skipped ({e}), trying Pollinations Text AI...")
+            print(f"Google API skipped ({e}), using Pollinations Text AI...")
 
     # 2. Try Pollinations Text API
-    try:
-        res = requests.post(
-            "https://text.pollinations.ai/",
-            json={
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": "Output only valid JSON in pure Urdu script.",
-                    },
-                    {"role": "user", "content": system_prompt},
-                ],
-                "model": "openai",
-                "jsonMode": True,
-            },
-            timeout=40,
-        )
-        if res.status_code == 200:
-            text = res.text.replace("```json", "").replace("```", "").strip()
-            start, end = text.find("{"), text.rfind("}") + 1
-            if start != -1 and end > start:
-                data = json.loads(text[start:end])
-                if has_urdu_script(data.get("voiceover_urdu", "")):
-                    if (
-                        not data.get("scenes")
-                        or len(data.get("scenes", [])) < 6
-                    ):
-                        data["scenes"] = build_default_scenes(dish_en)
-                    return data
-    except Exception as e:
-        print(f"Pollinations LLM fallback notice: {e}")
+    if not script_data:
+        try:
+            res = requests.post(
+                "https://text.pollinations.ai/",
+                json={
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": "Output only valid JSON in pure Urdu script.",
+                        },
+                        {"role": "user", "content": system_prompt},
+                    ],
+                    "model": "openai",
+                    "jsonMode": True,
+                },
+                timeout=45,
+            )
+            if res.status_code == 200:
+                text = res.text.replace("```json", "").replace("```", "").strip()
+                start, end = text.find("{"), text.rfind("}") + 1
+                if start != -1 and end > start:
+                    script_data = json.loads(text[start:end])
+        except Exception as e:
+            print(f"Pollinations LLM notice: {e}")
 
-    # 3. Rich, Varied, 100% Pure Urdu Feminine Script Fallback
-    templates = [
-        (
-            f"السلام علیکم دوستو! مزے دار پکوان میں آپ سب کو خوش آمدید۔ "
-            f"آج میں اپنے کچن میں آپ کے لیے بنا رہی ہوں انتہائی لذیذ اور گرما گرم {dish_ur}۔ "
-            f"سب سے پہلے میں نے کڑاہی میں تازہ ادرک لہسن، ٹماٹر اور خالص دیسی مصالحوں کو اچھی طرح بھون لیا ہے تاکہ مصالحے کا کچا پن ختم ہو جائے اور اصل روایتی ذائقہ نکل کر سامنے آئے۔ "
-            f"ماشاءاللہ، دیکھیں کتنا خوبصورت رنگ آیا ہے اور اس کی لاجواب خوشبو پورے کچن میں پھیل چکی ہے! "
-            f"اب آخر میں میں نے اس کے اوپر باریک کٹا ہوا ہرا دھنیا، ادرک اور ہری مرچیں چھڑک دی ہیں۔ "
-            f"لیجیے دوستو، ہماری شاندار {dish_ur} بالکل تیار ہے۔ اگر آپ کو میری آج کی محنت پسند آئی ہو تو ویڈیو کو لائک اور شیئر ضرور کریں۔"
-        ),
-        (
-            f"السلام علیکم میرے پیارے دوستو! مزے دار پکوان کے کچن سے میں آپ کو خوش آمدید کہتی ہوں۔ "
-            f"آج کے ولاگ میں میں تیار کر رہی ہوں سب کی پسندیدہ اور خوشبودار {dish_ur}۔ "
-            f"اس خاص ریسپی کے لیے میں نے تازہ ترین اجزاء اور گھر کے پسے ہوئے خوشبودار گرم مصالحے استعمال کیے ہیں، جنہیں ہلکی آنچ پر بڑی محبت سے پکایا گیا ہے۔ "
-            f"سبحان اللہ، جب مصالحہ اچھی طرح بھن جائے تو اس کا ذائقہ دگنا ہو جاتا ہے، اور سچ میں اسے دیکھ کر ہی منہ میں پانی آ رہا ہے! "
-            f"تازہ ہرے دھنیے اور لیموں کے ساتھ گارنش کرنے کے بعد اب میں اسے گرما گرم پیش کر رہی ہوں۔ "
-            f"آپ کو آج کی یہ مزیدار ڈش کیسی لگی، کمنٹ میں اپنی رائے کا اظہار ضرور کیجیے گا۔"
-        ),
-    ]
+    default_text = build_guaranteed_75s_history_script(topic_en, topic_ur)
+
+    if not script_data or not has_urdu_script(
+        script_data.get("voiceover_urdu", "")
+    ):
+        voiceover = default_text
+        caption = (
+            f"📜 History of {topic_en} ({topic_ur})! 🍲✨\n\n"
+            f"Janiye {topic_en} ki sadiyon purani tareekh aur shahi dastarkhwan ke raaz! "
+            f"Video kaisi lagi comment mein zaroor batayein ❤️👇\n\n"
+            f"#MazydarPakwan #FoodHistory #PakistaniFood #DesiFood #FoodDocumentary"
+        )
+        queries = base_keywords
+    else:
+        voiceover = script_data["voiceover_urdu"].strip()
+        # Enforce 75-second minimum length (at least ~185 Urdu words)
+        if len(voiceover.split()) < 180:
+            voiceover = (
+                voiceover
+                + " "
+                + (
+                    f"تاریخ دانوں کے مطابق {topic_ur} کی مقبولیت کا سب سے بڑا راز اس کے خالص دیسی مصالحے اور پکانے کا وہ قدیم طریقہ ہے جو نسل در نسل سینے بہ سینے منتقل ہوتا رہا۔ "
+                    f"شاہی باورچی خانوں میں اس ڈش کو تیار کرنے کے لیے خاص طور پر تجربہ کار رکابدار رکھے جاتے تھے جو مصالحوں کی خوشبو اور آنچ کے توازن کا خاص خیال رکھتے تھے۔ "
+                    f"یہی وجہ ہے کہ صدیوں گزرنے کے باوجود آج بھی ہر خاص و عام کی دعوت اس شاندار پکوان کے بغیر ادھوری سمجھی جاتی ہے۔ "
+                    f"اگر آپ کو کھانوں کی تاریخ کا یہ سفر پسند آیا ہو تو ویڈیو کو لائک کریں اور کمنٹ میں اپنی پسندیدہ ڈش کا نام ضرور لکھیں۔"
+                )
+            )
+        caption = script_data.get("caption") or f"📜 {topic_en} ({topic_ur}) #MazydarPakwan"
+        queries = script_data.get("search_queries", []) + base_keywords
+
     return {
-        "voiceover_urdu": random.choice(templates),
-        "caption": (
-            f"🔥 Mazydar Pakwan Special: {dish_en}! 🍲✨\n\n"
-            f"Aaj main ne apne kitchen mein banayi hai garma garam {dish_en} ({dish_ur}). "
-            f"Vlog kaisa laga comment mein zaroor batayein! ❤️👇\n\n"
-            f"#MazydarPakwan #PakistaniFood #FoodVlog #DesiFood #CookingReels"
-        ),
-        "scenes": build_default_scenes(dish_en),
+        "voiceover_urdu": voiceover,
+        "caption": caption,
+        "queries": queries,
     }
 
 
-def is_valid_rendered_image(img_bytes):
-    if not img_bytes or len(img_bytes) < 12000:
-        return False
-    try:
-        img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-        stat = ImageStat.Stat(img)
-        # Ensure image is not a solid/flat color wallpaper (check pixel standard deviation)
-        avg_stddev = sum(stat.stddev) / 3.0
-        return avg_stddev > 18.0
-    except Exception:
-        return False
-
-
-def polish_and_brand_hd_image(img_bytes, dish_en, scene_idx, output_path):
-    img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-    target_w, target_h = 1080, 1920
-    img_ratio = img.width / img.height
-    target_ratio = target_w / target_h
-
-    if img_ratio > target_ratio:
-        new_h = target_h
-        new_w = int(new_h * img_ratio)
-    else:
-        new_w = target_w
-        new_h = int(new_w / img_ratio)
-
-    # High-Definition LANCZOS upscale + UnsharpMask crisp filter
-    img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
-    left = (new_w - target_w) // 2
-    top = (new_h - target_h) // 2
-    img = img.crop((left, top, left + target_w, top + target_h))
-
-    img = img.filter(
-        ImageFilter.UnsharpMask(radius=1.6, percent=125, threshold=3)
-    )
-    img = ImageEnhance.Contrast(img).enhance(1.07)
-    img = ImageEnhance.Color(img).enhance(1.15)
-
-    overlay = Image.new("RGBA", (target_w, target_h), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-
-    # Sleek HD Top Branding Header
-    draw.rounded_rectangle(
-        [(55, 65), (target_w - 55, 190)],
-        radius=30,
-        fill=(12, 8, 4, 185),
-        outline=(255, 195, 45, 235),
-        width=4,
-    )
-
-    try:
-        font_title = ImageFont.truetype(
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 36
-        )
-        font_sub = ImageFont.truetype(
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 25
-        )
-    except Exception:
-        font_title = ImageFont.load_default()
-        font_sub = ImageFont.load_default()
-
-    draw.text(
-        (target_w // 2, 104),
-        "MAZYDAR PAKWAN",
-        fill=(255, 205, 55, 255),
-        font=font_title,
-        anchor="mm",
-    )
-    draw.text(
-        (target_w // 2, 154),
-        dish_en[:40],
-        fill=(255, 255, 255, 250),
-        font=font_sub,
-        anchor="mm",
-    )
-
-    final_img = Image.alpha_composite(img.convert("RGBA"), overlay).convert(
-        "RGB"
-    )
-    final_img.save(output_path, "PNG", optimize=True)
-
-
-def generate_scene_image(prompt, index, dish_en, output_path, generated_paths):
-    # Check if user uploaded character.png for Scene 0
-    if index == 0:
-        for ext in [
-            "character.png",
-            "character.jpg",
-            "character.jpeg",
-            "assets/character.png",
-        ]:
-            if os.path.exists(ext):
-                print(
-                    f"Scene 1: Using uploaded '{ext}' base character image..."
-                )
-                with open(ext, "rb") as f:
-                    polish_and_brand_hd_image(
-                        f.read(), dish_en, index, output_path
-                    )
-                return
-
-    # Crucial 20-second relaxation pause between scenes so Pollinations never triggers HTTP 402
-    if index > 0:
-        print(
-            f"Waiting 20 seconds before Scene {index+1} so AI server stays relaxed..."
-        )
-        time.sleep(20)
-
-    clean_prompt = f"{prompt}, ultra HD food photography, sharp focus, natural lighting, no text, no watermark"
-    encoded_prompt = urllib.parse.quote(clean_prompt)
-
-    # Rotate across models & endpoints (768x1344 native 9:16 avoids 402 memory limits, then upscaled to 1080x1920 HD)
-    attempts = [
-        ("Pollinations Flux (Free Direct)", "flux", False, 768, 1344),
-        ("Pollinations Flux (API Key)", "flux", True, 768, 1344),
-        ("Pollinations Turbo (Fast HD)", "turbo", False, 768, 1344),
-        ("Pollinations Flux (Standard 9:16)", "flux", False, 576, 1024),
-        ("Pollinations Default Engine", "gptimage", False, 768, 1344),
-    ]
-
-    for attempt_num, (label, model_name, use_key, w, h) in enumerate(
-        attempts, start=1
-    ):
-        if use_key and not POLLINATIONS_API_KEY:
-            continue
-
-        seed = random.randint(10000, 9999999)
-        url = (
-            f"https://image.pollinations.ai/prompt/{encoded_prompt}"
-            f"?width={w}&height={h}&model={model_name}&nologo=true&seed={seed}"
-        )
-        headers = {
-            "User-Agent": f"Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0"
-        }
-        if use_key and POLLINATIONS_API_KEY:
-            headers["Authorization"] = f"Bearer {POLLINATIONS_API_KEY}"
-
-        try:
-            print(f"Scene {index+1} [Try {attempt_num} - {label}]: Generating...")
-            r = requests.get(url, headers=headers, timeout=90)
-            if r.status_code == 200 and is_valid_rendered_image(r.content):
-                polish_and_brand_hd_image(
-                    r.content, dish_en, index, output_path
-                )
-                print(
-                    f"Scene {index+1} successfully generated in HD via {label}!"
-                )
-                return
-            else:
-                print(
-                    f"Scene {index+1} [{label}] status {r.status_code}. Cooling down 15s before next try..."
-                )
-        except Exception as e:
-            print(
-                f"Scene {index+1} [{label}] network notice: {e}. Cooling down 15s..."
-            )
-
-        time.sleep(15)
-
-    # Zero-Brown-Screen Guarantee: If all 5 tries fail, create a zoomed/cropped variation of a previous valid scene
-    if generated_paths:
-        source_scene = random.choice(generated_paths)
-        print(
-            f"Scene {index+1}: Creating close-up variation from {source_scene} (Zero brown screen guarantee)"
-        )
-        img = Image.open(source_scene).convert("RGB")
-        w, h = img.size
-        crop_box = (int(w * 0.08), int(h * 0.10), int(w * 0.92), int(h * 0.90))
-        cropped = img.crop(crop_box).resize(
-            (1080, 1920), Image.Resampling.LANCZOS
-        )
-        cropped.save(output_path, "PNG")
-        return
-
-    raise RuntimeError(
-        "Could not generate initial scene from AI server. Please re-run workflow."
-    )
-
-
 def generate_voiceover(text, audio_path):
+    # Slightly measured documentary pace (-4%) for clear historical storytelling and 75s+ duration
     cmd = [
         "edge-tts",
         "--voice",
         VOICE_NAME,
-        "--rate=+2%",
+        "--rate=-4%",
         "--pitch=+1Hz",
         "--text",
         text,
@@ -443,17 +696,266 @@ def get_audio_duration(audio_path):
     return float(res.stdout.strip())
 
 
-def generate_kitchen_sfx_and_mix(voice_path, final_audio_path, duration):
-    """Generates realistic kitchen cooking sizzle + soft culinary intro chime using FFmpeg DSP
+def ensure_minimum_audio_duration(topic_en, topic_ur, voice_path):
+    duration = get_audio_duration(voice_path)
+    print(f"Initial voiceover duration: {duration:.1f} seconds")
+    if duration < MIN_TARGET_DURATION:
+        print(
+            "Expanding script narration to guarantee 1 min 15 sec+ duration..."
+        )
+        extra_narration = (
+            f" مزید دلچسپ بات یہ ہے کہ برصغیر کے مختلف شہروں، جیسے لاہور، کراچی، پشاور، ملتان اور حیدرآباد میں {topic_ur} کو مقامی ذائقوں کے مطابق الگ الگ انداز میں بنایا جاتا ہے۔ "
+            f"کہیں اس میں تیز مصالحوں اور ہری مرچوں کا تڑکہ لگایا جاتا ہے تو کہیں دیسی گھی، زعفران اور خشک میوہ جات کے ساتھ اس کی لذت کو دوبالا کیا جاتا ہے۔ "
+            f"ہماری ثقافت اور مہمان نوازی کی یہ خوبصورت روایت آج پوری دنیا میں پاکستان اور برصغیر کے کھانوں کی پہچان بن چکی ہے۔"
+        )
+        full_text = (
+            build_guaranteed_75s_history_script(topic_en, topic_ur)
+            + extra_narration
+        )
+        generate_voiceover(full_text, voice_path)
+        duration = get_audio_duration(voice_path)
+        print(f"Expanded voiceover duration: {duration:.1f} seconds")
+    return duration
 
-    and mixes it cleanly beneath the female Urdu voiceover.
+
+def fetch_pixabay_media_pool(queries, needed_count):
+    """Fetches high-definition Pixabay food videos (primary) and high-res photos (secondary)
+
+    so we have enough unique fast-paced clips for the entire 75+ second video.
     """
-    sfx_path = "kitchen_ambience.wav"
-    # Pink noise shaped with highpass/lowpass & tremolo creates a warm, realistic karahi frying sizzle
+    fallback_food_Pool = [
+        "indian food",
+        "curry cooking",
+        "spices",
+        "biryani",
+        "kebab grill",
+        "frying pan",
+        "cooking fire",
+        "chef cooking",
+        "street food",
+        "traditional food",
+        "rice dish",
+        "meat stew",
+        "garlic spices",
+        "fresh herbs",
+        "flatbread baking",
+        "boiling pot",
+        "saffron",
+        "oriental spices",
+        "barbecue smoke",
+        "sweet dessert",
+    ]
+    all_queries = []
+    for q in queries + fallback_food_Pool:
+        if q not in all_queries:
+            all_queries.append(q)
+
+    video_urls = []
+    photo_urls = []
+    seen_ids = set()
+
+    print(
+        f"Searching Pixabay HD Library for {needed_count} fast-paced clips..."
+    )
+
+    # 1. Fetch Pixabay HD Stock Videos
+    for q in all_queries:
+        if len(video_urls) >= needed_count:
+            break
+        params = {
+            "key": PIXABAY_API_KEY,
+            "q": q,
+            "safesearch": "true",
+            "per_page": 10,
+        }
+        try:
+            r = requests.get(
+                "https://pixabay.com/api/videos/", params=params, timeout=20
+            )
+            if r.status_code == 200:
+                hits = r.json().get("hits", [])
+                random.shuffle(hits)
+                for h in hits:
+                    vid_id = f"vid_{h.get('id')}"
+                    if vid_id in seen_ids:
+                        continue
+                    vids = h.get("videos", {})
+                    url = (
+                        vids.get("large", {}).get("url")
+                        or vids.get("medium", {}).get("url")
+                        or vids.get("small", {}).get("url")
+                    )
+                    if url:
+                        seen_ids.add(vid_id)
+                        video_urls.append(("video", url))
+                        if len(video_urls) >= needed_count:
+                            break
+        except Exception as e:
+            print(f"Pixabay video search notice for '{q}': {e}")
+
+    # 2. Fetch Pixabay High-Res Photos to interleave or top up if needed
+    for q in all_queries:
+        if len(video_urls) + len(photo_urls) >= needed_count + 6:
+            break
+        params = {
+            "key": PIXABAY_API_KEY,
+            "q": q,
+            "image_type": "photo",
+            "safesearch": "true",
+            "per_page": 10,
+        }
+        try:
+            r = requests.get(
+                "https://pixabay.com/api/", params=params, timeout=20
+            )
+            if r.status_code == 200:
+                hits = r.json().get("hits", [])
+                random.shuffle(hits)
+                for h in hits:
+                    img_id = f"img_{h.get('id')}"
+                    if img_id in seen_ids:
+                        continue
+                    url = h.get("largeImageURL") or h.get("webformatURL")
+                    if url:
+                        seen_ids.add(img_id)
+                        photo_urls.append(("photo", url))
+        except Exception as e:
+            print(f"Pixabay photo search notice for '{q}': {e}")
+
+    combined = video_urls + photo_urls
+    if not combined:
+        raise RuntimeError(
+            "Pixabay returned no media! Check if PIXABAY_API_KEY is valid."
+        )
+
+    # Ensure we have at least `needed_count` items
+    while len(combined) < needed_count:
+        combined.extend(combined[: needed_count - len(combined)])
+
+    return combined[:needed_count]
+
+
+def render_single_fast_clip(
+    media_type, url, index, clip_duration, topic_en, output_clip
+):
+    fps = 30
+    safe_title = (
+        topic_en[:36].replace("'", "").replace(":", " -").replace('"', "")
+    )
+
+    # Sleek top branding bar drawn directly by FFmpeg in crisp 1080p HD
+    drawbox_filter = (
+        f"drawbox=x=40:y=60:w=1000:h=130:color=black@0.68:t=fill,"
+        f"drawbox=x=40:y=60:w=1000:h=130:color=0xFFC837@0.9:t=4,"
+        f"drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:"
+        f"text='MAZYDAR PAKWAN  |  FOOD HISTORY':fontcolor=0xFFC837:fontsize=29:x=(w-text_w)/2:y=86,"
+        f"drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:"
+        f"text='{safe_title}':fontcolor=white:fontsize=26:x=(w-text_w)/2:y=136"
+    )
+
+    if media_type == "video":
+        raw_vid = f"raw_{index}.mp4"
+        r = requests.get(url, timeout=45)
+        r.raise_for_status()
+        with open(raw_vid, "wb") as f:
+            f.write(r.content)
+
+        # Center crop to 1080x1920 vertical HD + slight speed boost (1.15x) for energetic visual pace
+        vf = (
+            f"setpts=0.88*PTS,"
+            f"scale=1080:1920:force_original_aspect_ratio=increase,"
+            f"crop=1080:1920,"
+            f"eq=contrast=1.06:saturation=1.15,"
+            f"{drawbox_filter},"
+            f"fps={fps},format=yuv420p"
+        )
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-stream_loop",
+            "-1",
+            "-i",
+            raw_vid,
+            "-vf",
+            vf,
+            "-t",
+            f"{clip_duration:.2f}",
+            "-an",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "20",
+            output_clip,
+        ]
+        subprocess.run(cmd, check=True)
+        if os.path.exists(raw_vid):
+            os.remove(raw_vid)
+    else:
+        raw_img = f"raw_{index}.jpg"
+        r = requests.get(url, timeout=35)
+        r.raise_for_status()
+        img = Image.open(io.BytesIO(r.content)).convert("RGB")
+        target_w, target_h = 1080, 1920
+        img_ratio = img.width / img.height
+        target_ratio = target_w / target_h
+        if img_ratio > target_ratio:
+            new_h, new_w = target_h, int(target_h * img_ratio)
+        else:
+            new_w, new_h = target_w, int(target_w / img_ratio)
+        img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+        left, top = (new_w - target_w) // 2, (new_h - target_h) // 2
+        img = img.crop((left, top, left + target_w, top + target_h))
+        img = img.filter(
+            ImageFilter.UnsharpMask(radius=1.5, percent=120, threshold=3)
+        )
+        img = ImageEnhance.Color(img).enhance(1.15)
+        img.save(raw_img, "JPEG", quality=95)
+
+        frames = int(clip_duration * fps)
+        z_expr = (
+            "min(zoom+0.0025,1.22)"
+            if index % 2 == 0
+            else "if(eq(on,1),1.22,max(zoom-0.0025,1.0))"
+        )
+        vf = (
+            f"scale=1300:2312,"
+            f"zoompan=z='{z_expr}':d={frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps={fps},"
+            f"{drawbox_filter},format=yuv420p"
+        )
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-loop",
+            "1",
+            "-i",
+            raw_img,
+            "-vf",
+            vf,
+            "-t",
+            f"{clip_duration:.2f}",
+            "-an",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "20",
+            output_clip,
+        ]
+        subprocess.run(cmd, check=True)
+        if os.path.exists(raw_img):
+            os.remove(raw_img)
+
+
+def generate_sfx_and_master_audio(voice_path, final_audio_path, duration):
+    """Generates subtle kitchen cooking sizzle + soft documentary ambience underneath the female voiceover."""
+    sfx_path = "kitchen_sfx.wav"
     sfx_filter = (
-        f"anoisesrc=d={duration}:c=pink:r=44100:a=0.035,"
-        f"highpass=f=1200,lowpass=f=6500,"
-        f"tremolo=f=7:d=0.45,"
+        f"anoisesrc=d={duration}:c=pink:r=44100:a=0.028,"
+        f"highpass=f=1100,lowpass=f=6000,"
+        f"tremolo=f=6:d=0.4,"
         f"afade=t=in:st=0:d=1.5,afade=t=out:st={max(duration-2.0, 1.0)}:d=2.0"
     )
     subprocess.run(
@@ -471,169 +973,6 @@ def generate_kitchen_sfx_and_mix(voice_path, final_audio_path, duration):
         check=True,
     )
 
-    # Mix voiceover (dominant, crystal clear) + kitchen cooking sizzle (subtle ambience)
     mix_filter = (
-        "[0:a]volume=1.35,highpass=f=80[voice];"
-        "[1:a]volume=0.28[sfx];"
-        "[voice][sfx]amix=inputs=2:duration=first:dropout_transition=2,"
-        "loudnorm=I=-15:TP=-1.5:LRA=11[outa]"
-    )
-    subprocess.run(
-        [
-            "ffmpeg",
-            "-y",
-            "-i",
-            voice_path,
-            "-i",
-            sfx_path,
-            "-filter_complex",
-            mix_filter,
-            "-map",
-            "[outa]",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
-            "-ar",
-            "44100",
-            final_audio_path,
-        ],
-        check=True,
-    )
-
-
-def build_hd_video(scene_paths, voice_path, output_video):
-    total_duration = get_audio_duration(voice_path)
-    final_audio_path = "mixed_master_audio.m4a"
-    generate_kitchen_sfx_and_mix(voice_path, final_audio_path, total_duration)
-
-    num_scenes = len(scene_paths)
-    clip_duration = max(total_duration / num_scenes, 3.2)
-    fps = 30
-    frames = int(clip_duration * fps)
-
-    clip_files = []
-    for i, img_path in enumerate(scene_paths):
-        clip_name = f"clip_{i}.mp4"
-        motion_type = i % 4
-
-        if motion_type == 0:
-            z_expr = "min(zoom+0.0012,1.16)"
-            x_expr = "iw/2-(iw/zoom/2)"
-            y_expr = "ih/2-(ih/zoom/2)"
-        elif motion_type == 1:
-            z_expr = "if(eq(on,1),1.16,max(zoom-0.0012,1.0))"
-            x_expr = "iw/2-(iw/zoom/2)"
-            y_expr = "ih/2-(ih/zoom/2)"
-        elif motion_type == 2:
-            z_expr = "1.12"
-            x_expr = f"max(0,min((iw-iw/zoom)*on/{frames},iw-iw/zoom))"
-            y_expr = "ih/2-(ih/zoom/2)"
-        else:
-            z_expr = "1.12"
-            x_expr = f"max(0,(iw-iw/zoom)*(1-on/{frames}))"
-            y_expr = "ih/2-(ih/zoom/2)"
-
-        vf_filter = (
-            f"scale=1350:2400,"
-            f"zoompan=z='{z_expr}':d={frames}:x='{x_expr}':y='{y_expr}':s=1080x1920:fps={fps},"
-            f"fade=t=in:st=0:d=0.3,fade=t=out:st={max(clip_duration-0.3, 0.5)}:d=0.3,"
-            f"format=yuv420p"
-        )
-        cmd = [
-            "ffmpeg",
-            "-y",
-            "-loop",
-            "1",
-            "-i",
-            img_path,
-            "-vf",
-            vf_filter,
-            "-t",
-            str(clip_duration),
-            "-c:v",
-            "libx264",
-            "-preset",
-            "fast",
-            "-crf",
-            "19",
-            "-pix_fmt",
-            "yuv420p",
-            clip_name,
-        ]
-        subprocess.run(cmd, check=True)
-        clip_files.append(clip_name)
-
-    with open("concat_list.txt", "w", encoding="utf-8") as f:
-        for c in clip_files:
-            f.write(f"file '{c}'\n")
-
-    cmd_final = [
-        "ffmpeg",
-        "-y",
-        "-f",
-        "concat",
-        "-safe",
-        "0",
-        "-i",
-        "concat_list.txt",
-        "-i",
-        final_audio_path,
-        "-c:v",
-        "libx264",
-        "-preset",
-        "fast",
-        "-profile:v",
-        "high",
-        "-crf",
-        "19",
-        "-c:a",
-        "copy",
-        "-pix_fmt",
-        "yuv420p",
-        "-shortest",
-        output_video,
-    ]
-    subprocess.run(cmd_final, check=True)
-
-
-def send_to_telegram(video_path, caption):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendVideo"
-    with open(video_path, "rb") as video_file:
-        files = {"video": video_file}
-        data = {
-            "chat_id": TELEGRAM_CHAT_ID,
-            "caption": caption,
-            "width": 1080,
-            "height": 1920,
-            "supports_streaming": True,
-        }
-        res = requests.post(url, data=data, files=files, timeout=180)
-        res.raise_for_status()
-        print("HD Video successfully sent to Telegram!")
-
-
-def main():
-    dish_en, dish_ur = pick_unique_dish()
-    script_data = generate_vlog_script(dish_en, dish_ur)
-
-    voice_path = "voice.mp3"
-    generate_voiceover(script_data["voiceover_urdu"], voice_path)
-
-    scene_paths = []
-    scenes = script_data.get("scenes", build_default_scenes(dish_en))[:6]
-    for idx, scene_prompt in enumerate(scenes):
-        img_path = f"scene_{idx}.png"
-        generate_scene_image(scene_prompt, idx, dish_en, img_path, scene_paths)
-        scene_paths.append(img_path)
-
-    output_video = "mazydar_pakwan_hd_reel.mp4"
-    build_hd_video(scene_paths, voice_path, output_video)
-
-    send_to_telegram(output_video, script_data["caption"])
-    save_used_dish(dish_en)
-    print(f"Successfully completed and logged HD vlog for: {dish_en}")
-
-
-if __name__ == "__main__":
-    main()
+        "[0:a]volume=1.4,highpass=f=80[voice];"
+        "[1:a]volume=0.2
