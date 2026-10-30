@@ -975,4 +975,126 @@ def generate_sfx_and_master_audio(voice_path, final_audio_path, duration):
 
     mix_filter = (
         "[0:a]volume=1.4,highpass=f=80[voice];"
-        "[1:a]volume=0.2
+        "[1:a]volume=0.25[sfx];"
+        "[voice][sfx]amix=inputs=2:duration=first:dropout_transition=2,"
+        "loudnorm=I=-15:TP=-1.5:LRA=11[outa]"
+    )
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-i",
+            voice_path,
+            "-i",
+            sfx_path,
+            "-filter_complex",
+            mix_filter,
+            "-map",
+            "[outa]",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-ar",
+            "44100",
+            final_audio_path,
+        ],
+        check=True,
+    )
+
+
+def send_to_telegram(video_path, caption):
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendVideo"
+    with open(video_path, "rb") as video_file:
+        files = {"video": video_file}
+        data = {
+            "chat_id": TELEGRAM_CHAT_ID,
+            "caption": caption,
+            "width": 1080,
+            "height": 1920,
+            "supports_streaming": True,
+        }
+        res = requests.post(url, data=data, files=files, timeout=240)
+        res.raise_for_status()
+        print("Fast-paced Pixabay HD Food History Video sent to Telegram!")
+
+
+def main():
+    topic_en, topic_ur, base_keywords = pick_unique_topic()
+    script_data = generate_history_script(topic_en, topic_ur, base_keywords)
+
+    voice_path = "voice.mp3"
+    generate_voiceover(script_data["voiceover_urdu"], voice_path)
+    total_duration = ensure_minimum_audio_duration(
+        topic_en, topic_ur, voice_path
+    )
+
+    final_audio_path = "master_audio.m4a"
+    generate_sfx_and_master_audio(voice_path, final_audio_path, total_duration)
+
+    # Calculate how many 3-second fast clips we need to cover the full 75+ second audio
+    num_clips = math.ceil(total_duration / CLIP_DURATION)
+    print(
+        f"Total Video Duration: {total_duration:.1f}s -> Preparing {num_clips} fast-paced clips (3.0s each)..."
+    )
+
+    media_pool = fetch_pixabay_media_pool(script_data["queries"], num_clips)
+
+    clip_files = []
+    for idx, (m_type, m_url) in enumerate(media_pool):
+        clip_name = f"clip_{idx:03d}.mp4"
+        try:
+            print(
+                f"Rendering fast clip {idx+1}/{num_clips} ({m_type})..."
+            )
+            render_single_fast_clip(
+                m_type, m_url, idx, CLIP_DURATION, topic_en, clip_name
+            )
+            clip_files.append(clip_name)
+        except Exception as e:
+            print(f"Clip {idx+1} fallback notice: {e}")
+            if clip_files:
+                clip_files.append(clip_files[-1])
+
+    with open("concat_list.txt", "w", encoding="utf-8") as f:
+        for c in clip_files:
+            f.write(f"file '{c}'\n")
+
+    output_video = "mazydar_pakwan_history_hd.mp4"
+    cmd_final = [
+        "ffmpeg",
+        "-y",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        "concat_list.txt",
+        "-i",
+        final_audio_path,
+        "-c:v",
+        "libx264",
+        "-preset",
+        "fast",
+        "-profile:v",
+        "high",
+        "-crf",
+        "20",
+        "-c:a",
+        "copy",
+        "-pix_fmt",
+        "yuv420p",
+        "-shortest",
+        output_video,
+    ]
+    subprocess.run(cmd_final, check=True)
+
+    send_to_telegram(output_video, script_data["caption"])
+    save_used_dish(topic_en)
+    print(
+        f"Successfully completed 75s+ Food History Documentary for: {topic_en}"
+    )
+
+
+if __name__ == "__main__":
+    main()
