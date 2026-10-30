@@ -1,4 +1,4 @@
-name: Mazydar Pakwan Auto Vlogger HD
+name: Mazydar Pakwan Food History HD
 
 on:
   schedule:
@@ -33,18 +33,19 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Generate HD AI Food Vlog & Send to Telegram
+      - name: Generate HD Food History Video & Send to Telegram
         env:
-          POLLINATIONS_API_KEY: ${{ secrets.POLLINATIONS_API_KEY }}
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          POLLINATIONS_API_KEY: ${{ secrets.POLLINATIONS_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python main.py
 
-      - name: Update Used Dishes History
+      - name: Update Used Dishes History (Lifetime No-Repeat)
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add used_dishes.txt
-          git diff --staged --quiet || git commit -m "Update completed dish history [skip ci]"
+          git diff --staged --quiet || git commit -m "Update completed food history topic [skip ci]"
           git push
