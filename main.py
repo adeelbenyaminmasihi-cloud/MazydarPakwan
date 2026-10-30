@@ -11,7 +11,7 @@ import edge_tts
 from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageStat
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
-PIXABAY_API_KEY = os.environ.get("PIXABAY_API_KEY", "").strip()
+POLLINATIONS_API_KEY = os.environ.get("POLLINATIONS_API_KEY_API_KEY", "").strip()
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 
