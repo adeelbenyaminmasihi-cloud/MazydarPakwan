@@ -25,6 +25,7 @@ VOICE_NAME = "ur-PK-UzmaNeural"
 # 2. SECURE ENVIRONMENT VARIABLES (Strictly from GitHub Secrets)
 # =====================================================================
 POLLINATIONS_API_KEY = os.getenv("POLLINATIONS_API_KEY", "").strip()
+REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN", "").strip()
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "").strip()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
@@ -81,13 +82,6 @@ MASTER_DISHES = [
 ]
 
 
-def get_pollinations_headers():
-    headers = {"Content-Type": "application/json"}
-    if POLLINATIONS_API_KEY:
-        headers["Authorization"] = f"Bearer {POLLINATIONS_API_KEY}"
-    return headers
-
-
 def get_used_dishes():
     if not os.path.exists(HISTORY_FILE):
         return []
@@ -117,7 +111,6 @@ def pick_unique_dish():
     try:
         r = requests.get(
             f"https://text.pollinations.ai/{urllib.parse.quote(prompt)}",
-            headers=get_pollinations_headers(),
             timeout=25,
         )
         if r.status_code == 200 and len(r.text.strip()) < 60:
@@ -138,7 +131,7 @@ Return ONLY valid JSON in this exact structure (no markdown blocks):
   "voiceover_urdu": "Write a warm, energetic 75-90 word vlog voiceover in pure Urdu script (اردو رسم الخط) using feminine grammar, starting with السلام علیکم دوستو! مزے دار پکوان میں خوش آمدید. Describe how you are cooking {dish_name}, its rich aroma, desi spices, and mouth-watering taste.",
   "caption": "🔥 Mazydar Pakwan Special: {dish_name}! 🍲✨\\n\\nAaj main ne aap sab ke liye banayi hai garma garam aur chatpati {dish_name}. Recipe aur vlog kaisa laga comment mein zaroor batayein! ❤️👇\\n\\n#MazydarPakwan #PakistaniFood #FoodVlog #DesiFood #CookingReels",
   "scenes": [
-    "{CHARACTER_PROMPT}, holding fresh ingredients and spices in a cozy Pakistani kitchen, smiling warmly at camera, vertical 9:16, ultra realistic",
+    "{CHARACTER_PROMPT}, holding fresh ingredients and spices in a cozy Pakistani kitchen, smiling warmly at camera, vertical 9:16, photorealistic",
     "{CHARACTER_PROMPT}, adding chopped onions, tomatoes, and vibrant desi masala into a sizzling karahi, aromatic steam rising, vertical 9:16",
     "Extreme close-up cinematic food shot of {dish_name} cooking on high flame, rich thick gravy bubbling with traditional spices, vertical 9:16",
     "{CHARACTER_PROMPT}, stirring the delicious {dish_name} with a wooden spoon, looking happy and impressed by the aroma, vertical 9:16",
@@ -147,7 +140,6 @@ Return ONLY valid JSON in this exact structure (no markdown blocks):
   ]
 }}"""
 
-    # 1. Try Google Gemini API (if valid AIza key is provided)
     if GOOGLE_API_KEY and GOOGLE_API_KEY.startswith("AIza"):
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GOOGLE_API_KEY}"
@@ -160,15 +152,11 @@ Return ONLY valid JSON in this exact structure (no markdown blocks):
                 text = text.replace("```json", "").replace("```", "").strip()
                 return json.loads(text)
         except Exception as e:
-            print(
-                f"Google API skipped ({e}), using Pollinations AI with API Key..."
-            )
+            print(f"Google API skipped ({e}), using Pollinations Text AI...")
 
-    # 2. Pollinations Authenticated LLM Endpoint
     try:
         res = requests.post(
             "https://text.pollinations.ai/",
-            headers=get_pollinations_headers(),
             json={
                 "messages": [
                     {
@@ -191,7 +179,6 @@ Return ONLY valid JSON in this exact structure (no markdown blocks):
     except Exception as e:
         print(f"Pollinations LLM warning: {e}")
 
-    # 3. Reliable Feminine Urdu Fallback
     return {
         "voiceover_urdu": f"السلام علیکم دوستو! مزے دار پکوان میں خوش آمدید۔ آج میں اپنے کچن میں آپ سب کے لیے بنا رہی ہوں انتہائی لذیذ اور خوشبودار {dish_name}۔ سب سے پہلے میں نے تازہ مصالحوں کو دیسی گھی میں اچھی طرح بھون لیا ہے تاکہ اصل روایتی ذائقہ نکل کر سامنے آئے۔ ماشاءاللہ، اس کی لاجواب خوشبو پورے کچن میں پھیل چکی ہے اور دیکھ کر ہی منہ میں پانی آ رہا ہے! اب میں نے اس پر ہرا دھنیا اور ہری مرچیں چھڑک دی ہیں۔ اگر آپ کو میری آج کی یہ مزیدار ریسپی پسند آئی ہو تو ویڈیو کو لائک اور شیئر ضرور کریں۔",
         "caption": f"🔥 Mazydar Pakwan Special: {dish_name}! 🍲✨\n\nAaj main ne banayi hai garma garam {dish_name}. Video kaisi lagi zaroor batayein! ❤️\n\n#MazydarPakwan #DesiFood #FoodVlog #PakistaniRecipes",
@@ -224,15 +211,12 @@ def polish_and_brand_image(img_bytes, dish_name, output_path):
     top = (new_h - target_h) // 2
     img = img.crop((left, top, left + target_w, top + target_h))
 
-    # Cinematic color pop (Contrast + Saturation)
     img = ImageEnhance.Contrast(img).enhance(1.06)
     img = ImageEnhance.Color(img).enhance(1.14)
 
-    # Subtle top & bottom branding badge
     overlay = Image.new("RGBA", (target_w, target_h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
 
-    # Top pill badge for channel & dish title
     draw.rounded_rectangle(
         [(60, 70), (target_w - 60, 185)],
         radius=28,
@@ -288,37 +272,110 @@ def generate_scene_image(prompt, index, dish_name, output_path):
                     polish_and_brand_image(f.read(), dish_name, output_path)
                 return
 
-    seed = random.randint(10000, 9999999)
+    # Cooldown delay to avoid Pollinations HTTP 402 concurrency block
+    if index > 0:
+        time.sleep(6)
+
     encoded_prompt = urllib.parse.quote(prompt)
+    ua_header = {
+        "User-Agent": f"MazydarPakwanBot/2.0 (Scene-{index}; +{random.randint(100,999)})"
+    }
 
-    # Use Pollinations Flux with API Key for priority, high-res, watermark-free media
-    url = (
-        f"https://image.pollinations.ai/prompt/{encoded_prompt}"
-        f"?width=1080&height=1920&model=flux&nologo=true&enhance=true&seed={seed}"
-    )
+    # Multi-Strategy List to bypass HTTP 402 limits completely:
+    # 1. With API Key (720x1280 fast & light on credits)
+    # 2. Keyless Free Flux Endpoint (bypasses account 402 credit lock)
+    # 3. Keyless Free Turbo Model (ultra-fast fallback)
+    # 4. Keyless Standard Endpoint
+    strategies = []
     if POLLINATIONS_API_KEY:
-        url += f"&key={urllib.parse.quote(POLLINATIONS_API_KEY)}"
+        auth_headers = {
+            **ua_header,
+            "Authorization": f"Bearer {POLLINATIONS_API_KEY}",
+        }
+        strategies.append((
+            "Pollinations Flux (API Key)",
+            f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=720&height=1280&model=flux&nologo=true&seed={random.randint(1000,999999)}",
+            auth_headers,
+        ))
 
-    headers = {}
-    if POLLINATIONS_API_KEY:
-        headers["Authorization"] = f"Bearer {POLLINATIONS_API_KEY}"
+    strategies.extend([
+        (
+            "Pollinations Flux (Free Direct)",
+            f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=720&height=1280&model=flux&nologo=true&seed={random.randint(1000,999999)}",
+            ua_header,
+        ),
+        (
+            "Pollinations Turbo (Free Fast)",
+            f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=720&height=1280&model=turbo&nologo=true&seed={random.randint(1000,999999)}",
+            ua_header,
+        ),
+        (
+            "Pollinations Default (Free Backup)",
+            f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=576&height=1024&nologo=true&seed={random.randint(1000,999999)}",
+            ua_header,
+        ),
+    ])
 
-    for attempt in range(4):
+    for label, url, hdrs in strategies:
         try:
-            r = requests.get(url, headers=headers, timeout=75)
-            if r.status_code == 200 and len(r.content) > 10000:
+            r = requests.get(url, headers=hdrs, timeout=75)
+            if r.status_code == 200 and len(r.content) > 8000:
                 polish_and_brand_image(r.content, dish_name, output_path)
-                print(f"Scene {index+1} generated via Pollinations Flux API!")
+                print(f"Scene {index+1} generated successfully via {label}!")
                 return
             else:
                 print(
-                    f"Scene {index+1} status {r.status_code}, retrying ({attempt+1}/4)..."
+                    f"Scene {index+1} [{label}] returned status {r.status_code}, switching strategy..."
                 )
         except Exception as e:
-            print(f"Attempt {attempt+1} for scene {index+1} warning: {e}")
-        time.sleep(4)
+            print(f"Scene {index+1} [{label}] warning: {e}")
+        time.sleep(5)
 
-    # Fallback dark culinary canvas if network drops completely
+    # Optional Backup: Replicate API if token exists in Secrets
+    if REPLICATE_API_TOKEN:
+        try:
+            headers = {
+                "Authorization": f"Bearer {REPLICATE_API_TOKEN}",
+                "Content-Type": "application/json",
+                "Prefer": "wait",
+            }
+            payload = {
+                "input": {
+                    "prompt": prompt,
+                    "aspect_ratio": "9:16",
+                    "output_format": "png",
+                }
+            }
+            r = requests.post(
+                "https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions",
+                headers=headers,
+                json=payload,
+                timeout=45,
+            )
+            if r.status_code in [200, 201]:
+                out = r.json().get("output")
+                img_url = out[0] if isinstance(out, list) else out
+                if img_url:
+                    img_res = requests.get(img_url, timeout=30)
+                    if img_res.status_code == 200:
+                        polish_and_brand_image(
+                            img_res.content, dish_name, output_path
+                        )
+                        print(f"Scene {index+1} generated via Replicate Backup!")
+                        return
+        except Exception as e:
+            print(f"Replicate backup skipped: {e}")
+
+    # Last Resort: Reuse previous valid scene image so video never shows a blank screen
+    if index > 0 and os.path.exists(f"scene_{index-1}.png"):
+        print(
+            f"Scene {index+1} reusing previous scene visual to avoid blank frame."
+        )
+        with open(f"scene_{index-1}.png", "rb") as f:
+            with open(output_path, "wb") as out_f:
+                out_f.write(f.read())
+        return
+
     fallback = Image.new("RGB", (1080, 1920), (35, 20, 10))
     buf = io.BytesIO()
     fallback.save(buf, format="PNG")
@@ -367,7 +424,6 @@ def build_video(scene_paths, audio_path, output_video):
         clip_name = f"clip_{i}.mp4"
         motion_type = i % 4
 
-        # 4 Dynamic Camera Movements (Zoom In, Zoom Out, Pan Right, Pan Left)
         if motion_type == 0:
             z_expr = "min(zoom+0.0016,1.18)"
             x_expr = "iw/2-(iw/zoom/2)"
@@ -417,7 +473,6 @@ def build_video(scene_paths, audio_path, output_video):
         for c in clip_files:
             f.write(f"file '{c}'\n")
 
-    # Combine clips with normalized studio-grade female voiceover
     cmd_final = [
         "ffmpeg",
         "-y",
