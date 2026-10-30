@@ -1,10 +1,10 @@
-name: Mazydar Pakwan Auto Vlogger
+name: Mazydar Pakwan Auto Vlogger HD
 
 on:
   schedule:
-    # Din mein 4 videos (Har 6 ghante baad)
-    - cron: '0 3,9,15,21 * * *'
-  workflow_dispatch: # Manual test button
+    # Din mein 5 videos (PKT Timings: 9 AM, 1 PM, 5 PM, 8 PM, 11 PM)
+    - cron: '0 4,8,12,15,18 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -12,6 +12,7 @@ permissions:
 jobs:
   generate-and-send-vlog:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
 
     steps:
       - name: Checkout Repository
@@ -22,25 +23,25 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install FFmpeg
+      - name: Install FFmpeg & HD Fonts
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg fonts-dejavu-core
 
       - name: Install Python Dependencies
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Generate AI Food Vlog & Send to Telegram
+      - name: Generate HD AI Food Vlog & Send to Telegram
         env:
+          POLLINATIONS_API_KEY: ${{ secrets.POLLINATIONS_API_KEY }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-          REPLICATE_API_TOKEN: ${{ secrets.REPLICATE_API_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python main.py
 
-      - name: Update Used Dishes History (No Repeat System)
+      - name: Update Used Dishes History
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
