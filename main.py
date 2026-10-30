@@ -3,9 +3,10 @@ import json
 import os
 import random
 import subprocess
+import sys
 import time
 import urllib.parse
-from PIL import Image, ImageDraw, ImageEnhance
+from PIL import Image
 import requests
 
 # =====================================================================
@@ -16,15 +17,24 @@ CHARACTER_PROMPT = (
     "warm welcoming smile, expressive eyes, realistic skin texture, cinematic kitchen lighting"
 )
 
-# Awaz: Male character ke liye "ur-PK-AsadNeural", Female ke liye "ur-PK-UzmaNeural"
 VOICE_NAME = "ur-PK-AsadNeural"
 
 # =====================================================================
-# 2. API KEYS & TOKENS (GitHub Secrets ya Direct Fallback)
+# 2. SECURE ENVIRONMENT VARIABLES (Reads strictly from GitHub Secrets)
+# =====================================================================
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "").strip()
+REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN", "").strip()
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+
+if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+    print(
+        "Error: TELEGRAM_BOT_TOKEN ya TELEGRAM_CHAT_ID GitHub Secrets mein set nahi hai!"
+    )
+    sys.exit(1)
 
 HISTORY_FILE = "used_dishes.txt"
 
-# Master Desi Dishes Pool (Plus dynamic generation so it never repeats)
 MASTER_DISHES = [
     "Karachi Special Degi Chicken Biryani",
     "Peshawari Charsi Mutton Karahi",
@@ -90,7 +100,6 @@ def pick_unique_dish():
     available = [d for d in MASTER_DISHES if d not in used]
     if available:
         return random.choice(available)
-    # Agar 40 dishes poori ho jayein to AI se bilkul nayi dish banwaye
     prompt = f"Give me ONLY the name of 1 unique Pakistani or Mughlai food dish not in this list: {', '.join(list(used)[-30:])}. Reply with just the dish name."
     try:
         r = requests.get(
@@ -107,7 +116,7 @@ def pick_unique_dish():
 def generate_vlog_script(dish_name):
     print(f"Generating script for: {dish_name}")
     system_prompt = f"""You are the writer for 'Mazydar Pakwan', a Pakistani AI food vlogger channel.
-Create a short, energetic 35-second food vlog script for the dish: "{dish_name}".
+Create a short, energetic food vlog script for the dish: "{dish_name}".
 
 Return ONLY valid JSON in this exact format (no markdown blocks):
 {{
@@ -122,7 +131,6 @@ Return ONLY valid JSON in this exact format (no markdown blocks):
   ]
 }}"""
 
-    # 1. Try Google Gemini API First
     if GOOGLE_API_KEY and GOOGLE_API_KEY.startswith("AIza"):
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GOOGLE_API_KEY}"
@@ -139,7 +147,6 @@ Return ONLY valid JSON in this exact format (no markdown blocks):
                 f"Google API skipped/failed ({e}), switching to Free AI LLM..."
             )
 
-    # 2. Free Fallback LLM (Pollinations OpenAI-compatible Endpoint - 100% Free)
     try:
         res = requests.post(
             "https://text.pollinations.ai/",
@@ -165,7 +172,6 @@ Return ONLY valid JSON in this exact format (no markdown blocks):
     except Exception as e:
         print(f"Free LLM fallback warning: {e}")
 
-    # 3. Bulletproof Local Fallback (Guarantees script never fails)
     return {
         "voiceover_urdu": f"السلام علیکم دوستو! مزے دار پکوان میں خوش آمدید۔ آج ہم اپنے کچن میں بنا رہے ہیں انتہائی لذیذ اور خوشبودار {dish_name}۔ سب سے پہلے ہم نے تازہ مصالحوں کو اچھی طرح بھون لیا ہے تاکہ اصل دیسی ذائقہ نکل کر سامنے آئے۔ ماشاءاللہ، اس کی خوشبو پورے کچن میں پھیل چکی ہے اور دیکھ کر ہی منہ میں پانی آ رہا ہے! اگر آپ کو آج کی یہ مزیدار ریسپی پسند آئی ہو تو ویڈیو کو لائک اور شیئر ضرور کریں۔",
         "caption": f"🔥 Mazydar Pakwan Special: {dish_name}! 🍲✨\n\nGarma garam aur chatpati {dish_name} tayyar hai! ❤️\n\n#MazydarPakwan #DesiFood #FoodVlog #PakistaniStreetFood",
@@ -200,7 +206,6 @@ def prepare_vertical_image(img_bytes, output_path):
 
 
 def generate_scene_image(prompt, index, output_path):
-    # Agar user ne character.png upload ki hai, to Scene 0 mein wohi original photo use hogi!
     if index == 0:
         for ext in [
             "character.png",
@@ -214,7 +219,6 @@ def generate_scene_image(prompt, index, output_path):
                     prepare_vertical_image(f.read(), output_path)
                 return
 
-    # 1. Try Replicate API (Flux-Schnell) if credits available
     if REPLICATE_API_TOKEN:
         try:
             headers = {
@@ -248,7 +252,6 @@ def generate_scene_image(prompt, index, output_path):
         except Exception as e:
             print(f"Replicate skipped for scene {index+1}: {e}")
 
-    # 2. 100% Free Unlimited AI Image Generation (Pollinations Flux Model)
     seed = random.randint(1000, 999999)
     encoded_prompt = urllib.parse.quote(prompt)
     free_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1080&height=1920&model=flux&nologo=true&seed={seed}"
@@ -264,7 +267,6 @@ def generate_scene_image(prompt, index, output_path):
             print(f"Attempt {attempt+1} for scene {index+1} waiting: {e}")
             time.sleep(4)
 
-    # 3. Emergency Fallback (if internet drops)
     fallback = Image.new("RGB", (1080, 1920), (35, 20, 10))
     fallback.save(output_path, "PNG")
 
@@ -308,7 +310,6 @@ def build_video(scene_paths, audio_path, output_video):
     clip_files = []
     for i, img_path in enumerate(scene_paths):
         clip_name = f"clip_{i}.mp4"
-        # Alternate smooth Zoom-In and Zoom-Out motion for realistic vlog feel
         if i % 2 == 0:
             z_expr = "min(zoom+0.0015,1.18)"
         else:
