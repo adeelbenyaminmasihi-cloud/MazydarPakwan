@@ -1,0 +1,49 @@
+name: Mazydar Pakwan Auto Vlogger
+
+on:
+  schedule:
+    # Din mein 4 videos (Har 6 ghante baad)
+    - cron: '0 3,9,15,21 * * *'
+  workflow_dispatch: # Manual test button
+
+permissions:
+  contents: write
+
+jobs:
+  generate-and-send-vlog:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Install Python Dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Generate AI Food Vlog & Send to Telegram
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          REPLICATE_API_TOKEN: ${{ secrets.REPLICATE_API_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python main.py
+
+      - name: Update Used Dishes History (No Repeat System)
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add used_dishes.txt
+          git diff --staged --quiet || git commit -m "Update completed dish history [skip ci]"
+          git push
